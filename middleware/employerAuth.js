@@ -1,6 +1,13 @@
 import jwt from "jsonwebtoken";
 import Employer from "../models/employerModel.js";
 
+res.cookie("employerToken", "test", {
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+
 const employerAuth = async (req, res, next) => {
   try {
     const token = req.cookies.employerToken;
