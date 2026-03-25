@@ -24,6 +24,12 @@ app.use(
   })
 );
 
+// Cron-Job
+app.get("/api/cron-job", (req, res) => {
+  console.log("Cron-Job Running");
+  res.send("Cron-Job Running");
+});
+
 // Routes
 app.get("/", (req, res) => {
   res.send("API Server Running");
