@@ -18,7 +18,8 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "http://localhost:3000", // Next.js frontend
+    origin: ["http://localhost:3000", "https://jmdtr-client.onrender.com"], // Next.js frontend
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
     credentials: true,
   })
 );
