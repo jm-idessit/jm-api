@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import employerRoutes from "./routes/employerRoute.js";
 import employeeRoutes from "./routes/employeeRoute.js";
+import attendanceRoutes from "./routes/attendanceRoute.js";
 import cookieParser from "cookie-parser";
 
 dotenv.config({ quiet: true });
@@ -30,6 +31,7 @@ app.get("/", (req, res) => {
 // Employer Routes
 app.use("/api/employers", employerRoutes);
 app.use("/api/employees", employeeRoutes);
+app.use("/api/attendance", attendanceRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
