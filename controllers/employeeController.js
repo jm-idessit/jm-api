@@ -58,6 +58,7 @@ export const loginEmployee = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    const isProduction = process.env.NODE_ENV === "production";
     const employee = await Employee.findOne({ email });
     if (!employee) {
       return res.status(400).json({ message: "Invalid email or password" });
@@ -72,10 +73,10 @@ export const loginEmployee = async (req, res) => {
 
     res.cookie("employeeToken", token, {
       httpOnly: true,
-      secure: false, // true in production
-      sameSite: "lax",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
-    });
+    }); 
 
     res.json({
       message: "Login successful",
@@ -93,8 +94,11 @@ export const loginEmployee = async (req, res) => {
 
 // LOGOUT
 export const logoutEmployee = (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.cookie("employeeToken", "", {
     httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     expires: new Date(0),
   });
 
