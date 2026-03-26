@@ -30,7 +30,7 @@ export const registerEmployer = async (req, res) => {
       phoneNumber,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "Employer registered successfully",
     });
   } catch (error) {

@@ -8,10 +8,12 @@ import {
   autoStartBreak,
   endBreak,
   autoEndBreak,
+  enableOvertime,
   getTodayAttendance,
   getWeeklyAttendance,
   getServerTime,
   getAllAttendance,
+  setRequiredWeeklyHours,
 } from "../controllers/attendanceController.js";
 import employeeAuth from "../middleware/employeeAuth.js";
 import employerAuth from "../middleware/employerAuth.js";
@@ -24,6 +26,7 @@ router.get("/server-time", getServerTime);
 // ── Employee — Clock In/Out ───────────────────────────────────────────────────
 router.post("/clock-in", employeeAuth, clockIn);
 router.post("/auto-clock-in", employeeAuth, autoClockIn);
+router.post("/overtime/enable", employeeAuth, enableOvertime);
 router.post("/clock-out", employeeAuth, clockOut);
 router.post("/auto-clock-out", employeeAuth, autoClockOut);
 
@@ -32,6 +35,7 @@ router.post("/break/start", employeeAuth, startBreak);
 router.post("/break/auto-start", employeeAuth, autoStartBreak);
 router.post("/break/end", employeeAuth, endBreak);
 router.post("/break/auto-end", employeeAuth, autoEndBreak);
+router.post("/ojt/required-hours", employeeAuth, setRequiredWeeklyHours);
 
 // ── Employee — Record Reads ───────────────────────────────────────────────────
 router.get("/today", employeeAuth, getTodayAttendance);

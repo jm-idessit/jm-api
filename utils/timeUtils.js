@@ -39,7 +39,13 @@ export const SCHEDULE = {
   clockInStart: 8 * 60,       // 08:00
   gracePeriodEnd: 8 * 60 + 30, // 08:30 — auto clock-in fires here
   clockOutStd: 17 * 60,        // 17:00
-  retentionEnd: 17 * 60 + 30,  // 17:30 — auto clock-out fires here
+  // If overtime is NOT enabled, auto clock-out fires 15 minutes after 17:00.
+  retentionEnd: 17 * 60 + 15,  // 17:15
+
+  // If overtime IS enabled, allow manual clock-out up to 22:00
+  overtimeEndManual: 22 * 60,  // 22:00
+  // and auto clock-out at 22:30 if user doesn't manually clock out.
+  overtimeAutoEnd: 22 * 60 + 30, // 22:30
 };
 
 export const BREAKS = {
@@ -69,7 +75,8 @@ export const BREAKS = {
  */
 const diffMinutes = (start, end) => {
   if (!start || !end) return 0;
-  return Math.max(0, Math.round((new Date(end) - new Date(start)) / 60000));
+  // Use floor to avoid counting partial minutes for rendered-hours computation.
+  return Math.max(0, Math.floor((new Date(end) - new Date(start)) / 60000));
 };
 
 /**
@@ -84,24 +91,56 @@ export const computeWorkStats = (attendance) => {
     return { totalWorkMinutes: 0, lateMinutes: 0, undertimeMinutes: 0 };
   }
 
-  // Gross duration from clock-in to clock-out
-  const grossMinutes = diffMinutes(clockIn.time, clockOut.time);
+  // Official start time rules (rendered-hours computation only; logs remain exact)
+  const clockInMinutes = toMinutes(new Date(clockIn.time));
+  let officialClockInMinutes = SCHEDULE.clockInStart;
+  const diffToOfficialStart = clockInMinutes - SCHEDULE.clockInStart;
 
-  // Sum of all break durations
-  const breakKeys = ["morning", "lunch", "afternoon"];
+  // Within 29 minutes before/after official start => official start
+  if (Math.abs(diffToOfficialStart) <= 29) {
+    officialClockInMinutes = SCHEDULE.clockInStart;
+  } else if (diffToOfficialStart > 29) {
+    // More than 29 minutes late => nearest round-up hour
+    officialClockInMinutes = Math.ceil(clockInMinutes / 60) * 60;
+  } else {
+    // Too early (only possible due to the allowed 30-min window) => don't grant extra credit
+    officialClockInMinutes = SCHEDULE.clockInStart;
+  }
+
+  // Official end time rules (rendered-hours computation only)
+  const clockOutMinutes = toMinutes(new Date(clockOut.time));
+  const outHour = Math.floor(clockOutMinutes / 60);
+  const outMinutePart = clockOutMinutes % 60;
+  const officialClockOutMinutes =
+    outMinutePart <= 30 ? outHour * 60 : (outHour + 1) * 60;
+
+  // Rendered-hours computation:
+  // Deduct ONLY the lunch break from work time.
+  // Morning/afternoon breaks are still recorded for display, but they don't
+  // affect rendered OJT/work hours per the provided examples.
+  const breakKeys = ["lunch"];
   const totalBreakMinutes = breakKeys.reduce((acc, key) => {
     const b = breaks?.[key];
-    return acc + diffMinutes(b?.start, b?.end);
+    if (!b?.start || !b?.end) return acc;
+
+    const startMinutes = toMinutes(new Date(b.start));
+    const endMinutes = toMinutes(new Date(b.end));
+    const officialBreakEndMinutes = BREAKS[key]?.end ?? endMinutes;
+    const effectiveEnd = Math.min(endMinutes, officialBreakEndMinutes);
+    return acc + Math.max(0, Math.floor(effectiveEnd - startMinutes));
   }, 0);
 
-  const totalWorkMinutes = Math.max(0, grossMinutes - totalBreakMinutes);
+  // Rendered gross duration from official in/out (logs remain exact)
+  const renderedGrossMinutes = Math.max(0, officialClockOutMinutes - officialClockInMinutes);
+  const renderedNetMinutes = renderedGrossMinutes - totalBreakMinutes;
+
+  // Rule: total hours/day must not include extra minutes beyond full hours
+  const totalWorkMinutes = Math.max(0, Math.floor(renderedNetMinutes / 60) * 60);
 
   // Late minutes: if clock-in is after 08:00
-  const clockInMinutes = toMinutes(new Date(clockIn.time));
   const lateMinutes = Math.max(0, clockInMinutes - SCHEDULE.clockInStart);
 
   // Undertime minutes: if clock-out is before 17:00
-  const clockOutMinutes = toMinutes(new Date(clockOut.time));
   const undertimeMinutes = Math.max(0, SCHEDULE.clockOutStd - clockOutMinutes);
 
   return { totalWorkMinutes, lateMinutes, undertimeMinutes };

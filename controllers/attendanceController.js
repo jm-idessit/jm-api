@@ -1,4 +1,5 @@
 import Attendance from "../models/attendanceModel.js";
+import OjtRequirement from "../models/ojtRequirementModel.js";
 import {
   getPHTNow,
   getPHTDateString,
@@ -53,11 +54,11 @@ export const clockIn = async (req, res) => {
     const now = getPHTNow();
     const minutes = nowMinutes();
 
-    if (minutes < SCHEDULE.clockInStart) {
-      return res.status(400).json({ message: "Clock-in is not yet available before 8:00 AM." });
-    }
-    if (minutes > SCHEDULE.gracePeriodEnd) {
-      return res.status(400).json({ message: "Grace period has ended. Auto clock-in was already triggered." });
+    // Manual clock-in allowed up to 30 minutes before official start.
+    if (minutes < SCHEDULE.clockInStart - 30) {
+      return res.status(400).json({
+        message: "Clock-in is not yet available before 7:30 AM.",
+      });
     }
 
     const record = await findOrCreateToday(req.employee._id);
@@ -110,6 +111,20 @@ export const clockOut = async (req, res) => {
       return res.status(400).json({ message: "You have already clocked out today." });
     }
 
+    const minutes = nowMinutes();
+    const manualClockOutLatest = record.overtimeEnabled
+      ? SCHEDULE.overtimeEndManual // 22:00
+      : SCHEDULE.clockOutStd + 15; // 17:15
+
+    // Prevent manual clock-out after the latest allowed time.
+    if (minutes > manualClockOutLatest) {
+      return res.status(400).json({
+        message: record.overtimeEnabled
+          ? "Overtime clock-out is only allowed up to 10:00 PM."
+          : "Clock-out is only allowed up to 5:15 PM. Auto clock-out will take effect.",
+      });
+    }
+
     // Close any open break automatically before clocking out
     record = await closeOpenBreaks(record, now, true);
 
@@ -136,12 +151,49 @@ export const autoClockOut = async (req, res) => {
       return res.status(200).json({ message: "Already clocked out.", attendance: record });
     }
 
+    const minutes = nowMinutes();
+    const targetAutoEnd = record.overtimeEnabled ? SCHEDULE.overtimeAutoEnd : SCHEDULE.clockOutStd + 15;
+
+    // Only apply auto clock-out once the correct time is reached.
+    if (minutes < targetAutoEnd) {
+      return res.status(200).json({ message: "Auto clock-out is not ready yet.", attendance: record });
+    }
+
     record = await closeOpenBreaks(record, now, true);
 
     record.clockOut = { time: now, isAutomatic: true };
     await saveStats(record);
 
     return res.json({ message: "Auto clock-out recorded.", attendance: record });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// POST /api/attendance/overtime/enable
+export const enableOvertime = async (req, res) => {
+  try {
+    const now = getPHTNow();
+    const date = getPHTDateString();
+    const record = await Attendance.findOne({ employeeId: req.employee._id, date });
+
+    if (!record || !record.clockIn?.time) {
+      return res.status(400).json({ message: "Clock in first before enabling overtime." });
+    }
+
+    if (record.clockOut?.time) {
+      return res.status(400).json({ message: "You have already clocked out today." });
+    }
+
+    if (record.overtimeEnabled) {
+      return res.status(200).json({ message: "Overtime already enabled.", attendance: record });
+    }
+
+    record.overtimeEnabled = true;
+    record.overtimeEnabledAt = now;
+    await record.save();
+
+    return res.json({ message: "Overtime enabled.", attendance: record });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -373,7 +425,55 @@ export const getWeeklyAttendance = async (req, res) => {
 
     const totalWorkMinutes = records.reduce((sum, r) => sum + (r.totalWorkMinutes || 0), 0);
 
-    return res.json({ records, weekStart: mondayStr, weekEnd: sundayStr, totalWorkMinutes });
+    const requirement = await OjtRequirement.findOne({
+      employeeId: req.employee._id,
+      weekStart: mondayStr,
+    });
+
+    const requiredWeeklyHours = requirement?.requiredHours ?? 45;
+
+    return res.json({
+      records,
+      weekStart: mondayStr,
+      weekEnd: sundayStr,
+      totalWorkMinutes,
+      requiredWeeklyHours,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// POST /api/attendance/ojt/required-hours
+export const setRequiredWeeklyHours = async (req, res) => {
+  try {
+    const { requiredHours } = req.body;
+
+    const n = Number(requiredHours);
+    if (!Number.isFinite(n) || n < 0.5) {
+      return res.status(400).json({ message: "requiredHours must be a number >= 0.5" });
+    }
+
+    // Compute Monday of the current PHT week (so requirement is tied to the same week view)
+    const now = new Date();
+    const phtNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const dayOfWeek = phtNow.getUTCDay(); // 0=Sun … 6=Sat
+    const monday = new Date(phtNow);
+    monday.setUTCDate(phtNow.getUTCDate() - ((dayOfWeek + 6) % 7));
+
+    const weekStartStr = monday.toISOString().slice(0, 10);
+
+    const upserted = await OjtRequirement.findOneAndUpdate(
+      { employeeId: req.employee._id, weekStart: weekStartStr },
+      { $set: { requiredHours: n } },
+      { upsert: true, new: true }
+    );
+
+    return res.json({
+      message: "Required OJT hours saved.",
+      requiredWeeklyHours: upserted.requiredHours,
+      weekStart: upserted.weekStart,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

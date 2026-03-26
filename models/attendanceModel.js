@@ -45,6 +45,10 @@ const AttendanceSchema = new mongoose.Schema(
     totalWorkMinutes: { type: Number, default: 0 },
     lateMinutes: { type: Number, default: 0 },
     undertimeMinutes: { type: Number, default: 0 },
+
+    // Used for clock-out time validation / availability (rendered-hours computation uses rounding rules).
+    overtimeEnabled: { type: Boolean, default: false },
+    overtimeEnabledAt: { type: Date },
   },
   { timestamps: true }
 );
