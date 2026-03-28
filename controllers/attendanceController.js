@@ -7,8 +7,8 @@ import {
   toMinutes,
   SCHEDULE,
   BREAKS,
-  computeWorkStats,
 } from "../utils/timeUtils.js";
+import { closeOpenBreaks, saveStats } from "../services/attendanceRecordUtils.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -31,18 +31,6 @@ const findOrCreateToday = async (employeeId) => {
       }
     }
   }
-  return record;
-};
-
-/**
- * Saves computed stats (totalWorkMinutes, lateMinutes, undertimeMinutes) onto the record.
- */
-const saveStats = async (record) => {
-  const stats = computeWorkStats(record.toObject());
-  record.totalWorkMinutes = stats.totalWorkMinutes;
-  record.lateMinutes = stats.lateMinutes;
-  record.undertimeMinutes = stats.undertimeMinutes;
-  await record.save();
   return record;
 };
 
@@ -238,27 +226,6 @@ export const enableOvertime = async (req, res) => {
 };
 
 // ─── Breaks ──────────────────────────────────────────────────────────────────
-
-/**
- * Closes any break that has a start but no end time.
- * @param {Document} record  Mongoose document
- * @param {Date} time        The time to use as the end timestamp
- * @param {boolean} auto     Whether this close is automatic
- */
-const closeOpenBreaks = async (record, time, auto = true) => {
-  const keys = ["morning", "lunch", "afternoon"];
-  let changed = false;
-  for (const key of keys) {
-    const brk = record.breaks[key];
-    if (brk?.start && !brk?.end) {
-      record.breaks[key].end = time;
-      record.breaks[key].isAutomatic = auto;
-      changed = true;
-    }
-  }
-  if (changed) await record.save();
-  return record;
-};
 
 /**
  * Determines which break window is currently active or within windowOpen time.
