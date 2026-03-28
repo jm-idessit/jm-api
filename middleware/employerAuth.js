@@ -1,9 +1,10 @@
 import jwt from "jsonwebtoken";
 import Employer from "../models/employerModel.js";
+import { getBearerOrCookie } from "./authToken.js";
 
 const employerAuth = async (req, res, next) => {
   try {
-    const token = req.cookies.employerToken;
+    const token = getBearerOrCookie(req, "employerToken");
 
     if (!token) {
       return res.status(401).json({ message: "Not authorized" });

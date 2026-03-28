@@ -16,9 +16,22 @@ connectDB();
 app.use(express.json());
 app.use(cookieParser());
 
+const defaultOrigins = ["http://localhost:3000", "http://127.0.0.1:3000", "https://jmdtr.onrender.com"];
+const extraOrigins = (process.env.FRONTEND_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([...defaultOrigins, ...extraOrigins]);
+
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://jmdtr.onrender.com"], // Next.js frontend
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
     credentials: true,
   })

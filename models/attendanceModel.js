@@ -41,6 +41,9 @@ const AttendanceSchema = new mongoose.Schema(
       afternoon: { type: BreakEntrySchema, default: () => ({}) },
     },
 
+    // Employee explicitly marked absent for the day (no auto / surprise clock-in)
+    declaredAbsent: { type: Boolean, default: false },
+
     // Computed and stored on clock-out
     totalWorkMinutes: { type: Number, default: 0 },
     lateMinutes: { type: Number, default: 0 },

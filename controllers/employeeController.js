@@ -116,6 +116,7 @@ export const loginEmployee = async (req, res) => {
 
     res.json({
       message: "Login successful",
+      token,
       employee: {
         id: employee._id,
         employeeId: employee.employeeId,

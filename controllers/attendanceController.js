@@ -63,6 +63,12 @@ export const clockIn = async (req, res) => {
 
     const record = await findOrCreateToday(req.employee._id);
 
+    if (record.declaredAbsent) {
+      return res.status(400).json({
+        message: "You marked yourself absent today. You cannot clock in unless your supervisor clears this.",
+      });
+    }
+
     if (record.clockIn?.time) {
       return res.status(400).json({ message: "You have already clocked in today." });
     }
@@ -76,11 +82,15 @@ export const clockIn = async (req, res) => {
   }
 };
 
-// POST /api/attendance/auto-clock-in  (triggered by frontend at 8:30 AM)
+// POST /api/attendance/auto-clock-in  (legacy — no longer used by client; kept for compatibility)
 export const autoClockIn = async (req, res) => {
   try {
     const now = getPHTNow();
     const record = await findOrCreateToday(req.employee._id);
+
+    if (record.declaredAbsent) {
+      return res.status(200).json({ message: "Declared absent — skipping auto clock-in.", attendance: record });
+    }
 
     if (record.clockIn?.time) {
       return res.status(200).json({ message: "Already clocked in.", attendance: record });
@@ -90,6 +100,34 @@ export const autoClockIn = async (req, res) => {
     await record.save();
 
     return res.json({ message: "Auto clock-in recorded.", attendance: record });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// POST /api/attendance/mark-absent  (explicit absent — blocks clock-in for the day)
+export const markAbsent = async (req, res) => {
+  try {
+    const minutes = nowMinutes();
+    if (minutes < SCHEDULE.clockInStart - 30) {
+      return res.status(400).json({
+        message: "Mark absent is available from 7:30 AM (PHT) onward.",
+      });
+    }
+
+    const record = await findOrCreateToday(req.employee._id);
+
+    if (record.clockIn?.time) {
+      return res.status(400).json({ message: "You already clocked in today — you cannot mark absent." });
+    }
+    if (record.declaredAbsent) {
+      return res.status(200).json({ message: "Already marked absent for today.", attendance: record });
+    }
+
+    record.declaredAbsent = true;
+    await record.save();
+
+    return res.json({ message: "Marked absent for today.", attendance: record });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

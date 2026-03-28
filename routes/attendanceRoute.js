@@ -2,6 +2,7 @@ import express from "express";
 import {
   clockIn,
   autoClockIn,
+  markAbsent,
   clockOut,
   autoClockOut,
   startBreak,
@@ -26,6 +27,7 @@ router.get("/server-time", getServerTime);
 // ── Employee — Clock In/Out ───────────────────────────────────────────────────
 router.post("/clock-in", employeeAuth, clockIn);
 router.post("/auto-clock-in", employeeAuth, autoClockIn);
+router.post("/mark-absent", employeeAuth, markAbsent);
 router.post("/overtime/enable", employeeAuth, enableOvertime);
 router.post("/clock-out", employeeAuth, clockOut);
 router.post("/auto-clock-out", employeeAuth, autoClockOut);

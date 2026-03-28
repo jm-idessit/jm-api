@@ -37,7 +37,7 @@ export const nowMinutes = () => toMinutes(new Date());
 
 export const SCHEDULE = {
   clockInStart: 8 * 60,       // 08:00
-  gracePeriodEnd: 8 * 60 + 30, // 08:30 — auto clock-in fires here
+  gracePeriodEnd: 8 * 60 + 30, // 08:30 — end of on-time window (late clock-in UI after this)
   clockOutStd: 17 * 60,        // 17:00
   // If overtime is NOT enabled, auto clock-out fires 15 minutes after 17:00.
   retentionEnd: 17 * 60 + 15,  // 17:15
