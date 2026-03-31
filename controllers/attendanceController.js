@@ -1,4 +1,5 @@
 import Attendance from "../models/attendanceModel.js";
+import AttendanceEditRequest from "../models/attendanceEditRequestModel.js";
 import OjtRequirement from "../models/ojtRequirementModel.js";
 import {
   getPHTNow,
@@ -9,6 +10,7 @@ import {
   BREAKS,
 } from "../utils/timeUtils.js";
 import { closeOpenBreaks, saveStats } from "../services/attendanceRecordUtils.js";
+import mongoose from "mongoose";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +34,141 @@ const findOrCreateToday = async (employeeId) => {
     }
   }
   return record;
+};
+
+// EDIT Attendance Record Helpers and for employer review of edit requests
+
+const EDITABLE_FIELDS = new Set([
+  "clockIn.time",
+  "clockOut.time",
+  "breaks.morning.start",
+  "breaks.morning.end",
+  "breaks.lunch.start",
+  "breaks.lunch.end",
+  "breaks.afternoon.start",
+  "breaks.afternoon.end",
+  "declaredAbsent",
+  "overtimeEnabled",
+]);
+
+const getEmployeeIdFromReq = (req) => {
+  return req.employee?._id || req.employee?.id || null;
+};
+
+const getEmployerIdFromReq = (req) => {
+  return req.employer?._id || req.employer?.id || null;
+};
+
+const flattenObject = (obj, parentKey = "", result = {}) => {
+  Object.entries(obj || {}).forEach(([key, value]) => {
+    const fullKey = parentKey ? `${parentKey}.${key}` : key;
+
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !(value instanceof Date)
+    ) {
+      flattenObject(value, fullKey, result);
+    } else {
+      result[fullKey] = value;
+    }
+  });
+
+  return result;
+};
+
+const normalizeRequestedChanges = (changes) => {
+  const normalizedChanges = [];
+
+  if (changes?.clockIn && "time" in changes.clockIn) {
+    normalizedChanges.push({
+      path: "clockIn.time",
+      value: changes.clockIn.time,
+    });
+  }
+
+  if (changes?.clockOut && "time" in changes.clockOut) {
+    normalizedChanges.push({
+      path: "clockOut.time",
+      value: changes.clockOut.time,
+    });
+  }
+
+  if (changes?.breaks?.morning && "start" in changes.breaks.morning) {
+    normalizedChanges.push({
+      path: "breaks.morning.start",
+      value: changes.breaks.morning.start,
+    });
+  }
+
+  if (changes?.breaks?.morning && "end" in changes.breaks.morning) {
+    normalizedChanges.push({
+      path: "breaks.morning.end",
+      value: changes.breaks.morning.end,
+    });
+  }
+
+  if (changes?.breaks?.lunch && "start" in changes.breaks.lunch) {
+    normalizedChanges.push({
+      path: "breaks.lunch.start",
+      value: changes.breaks.lunch.start,
+    });
+  }
+
+  if (changes?.breaks?.lunch && "end" in changes.breaks.lunch) {
+    normalizedChanges.push({
+      path: "breaks.lunch.end",
+      value: changes.breaks.lunch.end,
+    });
+  }
+
+  if (changes?.breaks?.afternoon && "start" in changes.breaks.afternoon) {
+    normalizedChanges.push({
+      path: "breaks.afternoon.start",
+      value: changes.breaks.afternoon.start,
+    });
+  }
+
+  if (changes?.breaks?.afternoon && "end" in changes.breaks.afternoon) {
+    normalizedChanges.push({
+      path: "breaks.afternoon.end",
+      value: changes.breaks.afternoon.end,
+    });
+  }
+
+  return normalizedChanges;
+};
+
+const minutesBetween = (start, end) => {
+  if (!start || !end) return 0;
+  const diff = Math.round((new Date(end) - new Date(start)) / 60000);
+  return Math.max(0, diff);
+};
+
+const recalculateAttendanceTotals = (attendance) => {
+  const grossMinutes = minutesBetween(
+    attendance.clockIn?.time,
+    attendance.clockOut?.time
+  );
+
+  const totalBreakMinutes =
+    minutesBetween(
+      attendance.breaks?.morning?.start,
+      attendance.breaks?.morning?.end
+    ) +
+    minutesBetween(
+      attendance.breaks?.lunch?.start,
+      attendance.breaks?.lunch?.end
+    ) +
+    minutesBetween(
+      attendance.breaks?.afternoon?.start,
+      attendance.breaks?.afternoon?.end
+    );
+
+  attendance.totalWorkMinutes = Math.max(0, grossMinutes - totalBreakMinutes);
+
+  // END
 };
 
 // ─── Clock In ────────────────────────────────────────────────────────────────
@@ -408,44 +545,29 @@ export const getTodayAttendance = async (req, res) => {
 };
 
 // GET /api/attendance/weekly
-export const getWeeklyAttendance = async (req, res) => {
+export const getEmployeeAttendanceRecords = async (req, res) => {
   try {
-    // Compute Monday of the current PHT week
-    const now = new Date();
-    const phtNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-    const dayOfWeek = phtNow.getUTCDay(); // 0=Sun … 6=Sat
-    const monday = new Date(phtNow);
-    monday.setUTCDate(phtNow.getUTCDate() - ((dayOfWeek + 6) % 7));
-    const sunday = new Date(monday);
-    sunday.setUTCDate(monday.getUTCDate() + 6);
-
-    const toDateStr = (d) => d.toISOString().slice(0, 10);
-    const mondayStr = toDateStr(monday);
-    const sundayStr = toDateStr(sunday);
-
     const records = await Attendance.find({
       employeeId: req.employee._id,
-      date: { $gte: mondayStr, $lte: sundayStr },
-    }).sort({ date: 1 });
+    }).sort({ date: -1 });
 
-    const totalWorkMinutes = records.reduce((sum, r) => sum + (r.totalWorkMinutes || 0), 0);
+    const totalWorkMinutes = records.reduce(
+      (sum, record) => sum + (record.totalWorkMinutes || 0),
+      0
+    );
 
-    const requirement = await OjtRequirement.findOne({
-      employeeId: req.employee._id,
-      weekStart: mondayStr,
-    });
-
-    const requiredWeeklyHours = requirement?.requiredHours ?? 45;
-
-    return res.json({
-      records,
-      weekStart: mondayStr,
-      weekEnd: sundayStr,
+    return res.status(200).json({
+      success: true,
+      totalRecords: records.length,
       totalWorkMinutes,
-      requiredWeeklyHours,
+      records,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    console.error("getEmployeeAttendanceRecords error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -512,5 +634,297 @@ export const getAllAttendance = async (req, res) => {
     return res.json({ records, total: records.length });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+};
+
+// DELETE Attendance Record (Employee only)
+export const deleteAttendanceRecord = async (req, res) => {
+  try {
+    const { attendanceId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(attendanceId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid attendance record ID",
+      });
+    }
+
+    const deletedAttendance = await Attendance.findByIdAndDelete(attendanceId);
+
+    if (!deletedAttendance) {
+      return res.status(404).json({
+        success: false,
+        message: "Attendance record not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance record deleted successfully",
+    });
+  } catch (error) {
+    console.error("deleteAttendanceRecord error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete attendance record",
+    });
+  }
+};
+
+// Edit and emloyers approval of requests
+
+export const submitAttendanceEditRequest = async (req, res) => {
+  try {
+    const { attendanceId } = req.params;
+    const employeeId = getEmployeeIdFromReq(req);
+    const { changes, reason = "" } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(attendanceId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid attendance record ID.",
+      });
+    }
+
+    if (!employeeId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized employee request.",
+      });
+    }
+
+    if (!changes || typeof changes !== "object") {
+      return res.status(400).json({
+        success: false,
+        message: "Changes payload is required.",
+      });
+    }
+
+    const attendance = await Attendance.findById(attendanceId);
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: "Attendance record not found.",
+      });
+    }
+
+    if (attendance.employeeId.toString() !== employeeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only request edits for your own attendance record.",
+      });
+    }
+
+    const existingPending = await AttendanceEditRequest.findOne({
+      attendanceId,
+      employeeId,
+      status: "pending",
+    });
+
+    if (existingPending) {
+      return res.status(409).json({
+        success: false,
+        message: "There is already a pending edit request for this record.",
+      });
+    }
+
+    const normalizedChanges = normalizeRequestedChanges(changes);
+
+    if (!normalizedChanges.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid changes were submitted.",
+      });
+    }
+
+    const editRequest = await AttendanceEditRequest.create({
+      attendanceId,
+      employeeId,
+      changes: normalizedChanges,
+      reason,
+      status: "pending",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Attendance edit request submitted for approval.",
+      data: editRequest,
+    });
+  } catch (error) {
+    console.error("submitAttendanceEditRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to submit attendance edit request.",
+    });
+  }
+};
+
+export const getMyAttendanceEditRequests = async (req, res) => {
+  try {
+    const employeeId = getEmployeeIdFromReq(req);
+
+    const requests = await AttendanceEditRequest.find({
+      employeeId,
+    })
+      .populate("attendanceId")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      total: requests.length,
+      data: requests,
+    });
+  } catch (error) {
+    console.error("getMyAttendanceEditRequests error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch edit requests.",
+    });
+  }
+};
+
+export const getAttendanceEditRequests = async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    const filter = {};
+    if (status && ["pending", "approved", "rejected"].includes(status)) {
+      filter.status = status;
+    }
+
+    const requests = await AttendanceEditRequest.find(filter)
+      .populate("attendanceId")
+      .populate("employeeId")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      total: requests.length,
+      data: requests,
+    });
+  } catch (error) {
+    console.error("getAttendanceEditRequests error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch attendance edit requests.",
+    });
+  }
+};
+
+export const approveAttendanceEditRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const employerId = getEmployerIdFromReq(req);
+
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid edit request ID.",
+      });
+    }
+
+    const editRequest = await AttendanceEditRequest.findById(requestId);
+
+    if (!editRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Edit request not found.",
+      });
+    }
+
+    if (editRequest.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Only pending requests can be approved.",
+      });
+    }
+
+    const attendance = await Attendance.findById(editRequest.attendanceId);
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: "Original attendance record not found.",
+      });
+    }
+
+    for (const change of editRequest.changes) {
+      attendance.set(change.path, change.value);
+    }
+
+    recalculateAttendanceTotals(attendance);
+    await attendance.save();
+
+    editRequest.status = "approved";
+    editRequest.reviewedBy = employerId;
+    editRequest.reviewedAt = new Date();
+    editRequest.rejectionReason = "";
+    await editRequest.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance edit request approved successfully.",
+      data: {
+        attendance,
+        editRequest,
+      },
+    });
+  } catch (error) {
+    console.error("approveAttendanceEditRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to approve edit request.",
+    });
+  }
+};
+
+export const rejectAttendanceEditRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const employerId = getEmployerIdFromReq(req);
+    const { rejectionReason = "" } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid edit request ID.",
+      });
+    }
+
+    const editRequest = await AttendanceEditRequest.findById(requestId);
+
+    if (!editRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Edit request not found.",
+      });
+    }
+
+    if (editRequest.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Only pending requests can be rejected.",
+      });
+    }
+
+    editRequest.status = "rejected";
+    editRequest.reviewedBy = employerId;
+    editRequest.reviewedAt = new Date();
+    editRequest.rejectionReason = rejectionReason;
+
+    await editRequest.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance edit request rejected successfully.",
+      data: editRequest,
+    });
+  } catch (error) {
+    console.error("rejectAttendanceEditRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to reject edit request.",
+    });
   }
 };

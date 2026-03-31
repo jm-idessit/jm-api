@@ -11,10 +11,16 @@ import {
   autoEndBreak,
   enableOvertime,
   getTodayAttendance,
-  getWeeklyAttendance,
+  getEmployeeAttendanceRecords,
   getServerTime,
   getAllAttendance,
   setRequiredWeeklyHours,
+  deleteAttendanceRecord,
+  submitAttendanceEditRequest,
+  getMyAttendanceEditRequests,
+  getAttendanceEditRequests,
+  approveAttendanceEditRequest,
+  rejectAttendanceEditRequest,
 } from "../controllers/attendanceController.js";
 import employeeAuth from "../middleware/employeeAuth.js";
 import employerAuth from "../middleware/employerAuth.js";
@@ -41,9 +47,21 @@ router.post("/ojt/required-hours", employeeAuth, setRequiredWeeklyHours);
 
 // ── Employee — Record Reads ───────────────────────────────────────────────────
 router.get("/today", employeeAuth, getTodayAttendance);
-router.get("/weekly", employeeAuth, getWeeklyAttendance);
+router.get("/records", employeeAuth, getEmployeeAttendanceRecords);
 
 // ── Employer — Admin Read ─────────────────────────────────────────────────────
 router.get("/all", employerAuth, getAllAttendance);
+
+// ── Employee — Delete ───────────────────
+router.delete("/record/:attendanceId", employeeAuth, deleteAttendanceRecord);
+
+// ── Employee — Edit Requests ─────────────────────────────────────────────────
+router.post("/edit-requests/:attendanceId", employeeAuth, submitAttendanceEditRequest);
+router.get("/edit-requests/mine", employeeAuth, getMyAttendanceEditRequests);
+
+// Employer review routes
+router.get("/edit-requests", employerAuth, getAttendanceEditRequests);
+router.patch("/edit-requests/:requestId/approve", employerAuth, approveAttendanceEditRequest);
+router.patch("/edit-requests/:requestId/reject", employerAuth, rejectAttendanceEditRequest);
 
 export default router;
